@@ -1,4 +1,3 @@
-from tortoise.contrib.fastapi import register_tortoise
 from tortoise import Tortoise
 import os
 

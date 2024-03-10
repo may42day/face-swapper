@@ -1,7 +1,9 @@
-from concurrent.futures import ThreadPoolExecutor
-from fastapi import HTTPException
 import asyncio
+from typing import Any, BinaryIO, List, Union
+import numpy as np
 
+from src.models import InSwapper
+from src.exceptions import NoFacesFoundException
 from src.utils import (
     numpy_array_to_bytes,
     process_uploaded_image,
@@ -11,9 +13,11 @@ from src.utils import (
 
 
 class InSwapperProcessor:
-    def __init__(self, in_swapper):
+    def __init__(self, in_swapper: InSwapper):
         self.in_swapper = in_swapper
         self.genereated_image = None
+        self._app = init_detecting_model()
+        self._swapper = init_swapper()
 
     async def replace_faces(self):
         result = await self._async_process_replace(
@@ -26,36 +30,37 @@ class InSwapperProcessor:
         self.in_swapper.result_img = img
         await self.in_swapper.save()
 
-    async def _async_process_replace(self, face_image, source_image):
-        loop = asyncio.get_event_loop()
-        with ThreadPoolExecutor() as pool:
-            result = await loop.run_in_executor(
-                pool, self._sync_process_replace, face_image, source_image
-            )
+    async def _async_process_replace(
+        self, face_image: BinaryIO, source_image: BinaryIO
+    ):
+        result = await asyncio.to_thread(
+            self._sync_process_replace, face_image, source_image
+        )
         return result
 
-    def _sync_process_replace(self, face_image, source_image):
+    def _sync_process_replace(self, face_image: BinaryIO, source_image: BinaryIO):
         source_face_img = process_uploaded_image(face_image)
         source_img = process_uploaded_image(source_image)
 
-        app = init_detecting_model()
-        swapper = init_swapper()
+        faces = self._find_faces(source_img)
+        source_face = self._find_faces(source_face_img, return_first=True)
 
-        faces = self._find_faces(app, source_img)
-        source_face = self._find_faces(app, source_face_img, return_first=True)
-
-        result = self._replace_faces_on_image(source_img, source_face, faces, swapper)
+        result = self._replace_faces_on_image(source_img, source_face, faces)
         return result
 
-    def _find_faces(self, app, img, return_first=False):
-        faces = app.get(img)
+    def _find_faces(
+        self, img: np.ndarray, return_first: bool = False
+    ) -> Union[Any, List[Any]]:
+        faces = self._app.get(img)
         faces = sorted(faces, key=lambda x: x.bbox[0])
         if not faces:
-            raise HTTPException(status_code=400, detail="No faces detected on picture")
+            raise NoFacesFoundException()
         return faces[0] if return_first else faces
 
-    def _replace_faces_on_image(self, source_img, source_face, faces, swapper):
+    def _replace_faces_on_image(
+        self, source_img: np.ndarray, source_face: np.ndarray, faces
+    ) -> np.ndarray:
         result = source_img.copy()
         for face in faces:
-            result = swapper.get(result, face, source_face, paste_back=True)
+            result = self._swapper.get(result, face, source_face, paste_back=True)
         return result

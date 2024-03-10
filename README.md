@@ -1,5 +1,7 @@
 # Face changer
 
+This is an initial version for test task. Future iterations are expected to implement Celery and Docker integration, utility function segmentation, code coverage with tests and detailed code commenting.
+
 ---
 ## Instalation
 
